@@ -1,0 +1,33 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        perl: ['5.20', '5.26', '5.32', '5.38', '5.40']
+    name: Linux Perl ${{ matrix.perl }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+      - run: cpanm -qn XS::Parse::Keyword
+      - run: perl Makefile.PL
+      - run: make
+      - run: make test
+      - name: Author tests
+        run: |
+          cpanm -qn Test::LeakTrace Test::Pod 2>/dev/null || true
+          prove -Iblib/lib -Iblib/arch -rv xt/ || true
+
+  macos:
+    runs-on: macos-latest
+    name: macOS
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shogo82148/actions-setup-perl@v1
+      - run: cpanm -qn XS::Parse::Keyword
+      - run: perl Makefile.PL
+      - run: make
+      - run: make test

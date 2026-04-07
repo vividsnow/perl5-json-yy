@@ -1,0 +1,13 @@
+Revision history for JSON-YY
+
+0.04  2026-04-09
+    - Migrate to XS::Parse::Keyword (lexically scoped keywords)
+
+0.03  2026-04-09
+    - Fix roundtrip test on long-double perls
+
+0.02  2026-04-08
+    - Fix keyword plugin hijacking other modules' XSUBs
+
+0.01  2026-04-07
+    - Initial release
