@@ -31,3 +31,107 @@ jobs:
       - run: perl Makefile.PL
       - run: make
       - run: make test
+
+  windows:
+    runs-on: windows-latest
+    name: Windows (Strawberry)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          distribution: strawberry
+      - run: cpanm -qn XS::Parse::Keyword
+      - run: perl Makefile.PL
+      - run: gmake
+      - run: gmake test
+
+  # Source-built perls with number configs that prebuilt perls never cover.
+  # These guard the long-double / quadmath jfind regression and the 32-bit-IV
+  # integer-truncation path that CPAN Testers surfaced but the matrix above
+  # (all stock 64-bit-IV, double-NV perls) cannot reach.
+  linux-numeric:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: long-double, flags: '-Duselongdouble', nvtype: 'long double' }
+          - { name: quadmath,    flags: '-Dusequadmath',   nvtype: '__float128'  }
+    name: Linux Perl ${{ matrix.name }}
+    env:
+      PERL_VERSION: '5.40.2'
+      PERL_PREFIX: ${{ github.workspace }}/localperl
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache ${{ matrix.name }} perl
+        id: cache-perl
+        uses: actions/cache@v4
+        with:
+          path: localperl
+          key: perl-${{ env.PERL_VERSION }}-${{ matrix.name }}-v1
+      - name: Build perl ${{ matrix.name }}
+        if: steps.cache-perl.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL "https://www.cpan.org/src/5.0/perl-${PERL_VERSION}.tar.gz" | tar xz
+          cd "perl-${PERL_VERSION}"
+          ./Configure -des -Dprefix="$PERL_PREFIX" ${{ matrix.flags }}
+          make -j"$(nproc)"
+          make install
+      - name: Show and assert numeric config
+        run: |
+          "$PERL_PREFIX/bin/perl" -V:nvtype -V:nvsize -V:ivsize -V:archname
+          got=$("$PERL_PREFIX/bin/perl" -MConfig -e 'print $Config{nvtype}')
+          test "$got" = "${{ matrix.nvtype }}" \
+            || { echo "expected nvtype='${{ matrix.nvtype }}', got '$got' (stale/wrong cached perl?)"; exit 1; }
+      - name: Install deps
+        run: |
+          curl -fsSL https://cpanmin.us -o /tmp/cpanm
+          "$PERL_PREFIX/bin/perl" /tmp/cpanm -qn XS::Parse::Keyword
+      - name: Build and test
+        run: |
+          "$PERL_PREFIX/bin/perl" Makefile.PL
+          make
+          make test
+
+  # 32-bit (ILP32) userland with a 32-bit IV: needs an i386 container AND a
+  # source build with -Uuse64bitint, since the stock i386 distro perl ships
+  # with use64bitint=define (ivsize=8) and would not exercise the path.
+  linux-32bit:
+    runs-on: ubuntu-latest
+    name: Linux Perl 32-bit-IV (i386)
+    env:
+      PERL_VERSION: '5.40.2'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache 32-bit-IV perl
+        id: cache-perl
+        uses: actions/cache@v4
+        with:
+          path: localperl
+          key: perl-i386-${{ env.PERL_VERSION }}-32int-v1
+      - name: Build perl (i386, -Uuse64bitint) and test
+        run: |
+          docker run --rm --platform linux/386 \
+            -e PERL_VERSION -e CACHE_HIT="${{ steps.cache-perl.outputs.cache-hit }}" \
+            -v "$PWD":/src -w /src i386/debian:bookworm bash -c '
+              set -e
+              dpkg --print-architecture
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends curl gcc libc6-dev make ca-certificates
+              if [ "$CACHE_HIT" != "true" ]; then
+                curl -fsSL "https://www.cpan.org/src/5.0/perl-$PERL_VERSION.tar.gz" | tar xz
+                cd "perl-$PERL_VERSION"
+                ./Configure -des -Dprefix=/src/localperl -Uuse64bitint
+                make -j"$(nproc)"
+                make install
+                cd ..
+              fi
+              /src/localperl/bin/perl -V:ivsize -V:uvsize -V:archname
+              test "$(/src/localperl/bin/perl -e "print \$Config::Config{ivsize}" -MConfig)" = 4 \
+                || { echo "expected ivsize=4"; exit 1; }
+              curl -fsSL https://cpanmin.us -o /tmp/cpanm
+              /src/localperl/bin/perl /tmp/cpanm -qn XS::Parse::Keyword
+              /src/localperl/bin/perl Makefile.PL
+              make
+              make test
+            '
