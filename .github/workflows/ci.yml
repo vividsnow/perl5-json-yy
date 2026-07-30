@@ -4,8 +4,10 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        perl: ['5.20', '5.26', '5.32', '5.38', '5.40']
+        # 5.14 is what MIN_PERL_VERSION (and XS::Parse::Keyword) claims
+        perl: ['5.14', '5.16', '5.20', '5.26', '5.32', '5.38', '5.40']
     name: Linux Perl ${{ matrix.perl }}
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +22,32 @@ jobs:
         run: |
           cpanm -qn Test::LeakTrace Test::Pod 2>/dev/null || true
           prove -Iblib/lib -Iblib/arch -rv xt/ || true
+
+  # A threaded perl exercises the magic svt_dup paths (t/25_threads.t); the
+  # stock Linux perls above are all non-threaded, so this is the only job that
+  # reaches them -- and Windows/Strawberry is threaded by default.
+  linux-threads:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        perl: ['5.26', '5.40']
+    name: Linux Perl ${{ matrix.perl }} (ithreads)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+          multi-thread: true
+      - name: Assert this perl really is threaded
+        run: |
+          perl -V:useithreads
+          test "$(perl -MConfig -e 'print $Config{useithreads}')" = define \
+            || { echo "expected a threaded perl"; exit 1; }
+      - run: cpanm -qn XS::Parse::Keyword
+      - run: perl Makefile.PL
+      - run: make
+      - run: make test
 
   macos:
     runs-on: macos-latest
