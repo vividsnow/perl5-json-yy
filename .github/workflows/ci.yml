@@ -20,8 +20,8 @@ jobs:
       - run: make test
       - name: Author tests
         run: |
-          cpanm -qn Test::LeakTrace Test::Pod 2>/dev/null || true
-          prove -Iblib/lib -Iblib/arch -rv xt/ || true
+          cpanm -qn Test::LeakTrace Test::Pod
+          prove -Iblib/lib -Iblib/arch -rv xt/
 
   # A threaded perl exercises the magic svt_dup paths (t/25_threads.t); the
   # stock Linux perls above are all non-threaded, so this is the only job that
